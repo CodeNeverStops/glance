@@ -1,0 +1,4 @@
+{
+  "name": "Glance Chrome extension",
+  "install": "python3 --version && google-chrome --version"
+}
