@@ -65,41 +65,68 @@ function parseRss(xmlText) {
   return { items: out, channelTitle };
 }
 
-function formatPubDate(pubDate, timeZone) {
+function parsePubDateToMs(pubDate) {
   const s = String(pubDate || "").trim();
-  if (!s) return "";
-  
-  // 1. Standard RSS 2.0 (e.g. "Fri, 26 Dec 2025 19:59:00 +0800")
-  let m = s.match(/(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})/);
+  if (!s) return NaN;
+
+  const direct = Date.parse(s);
+  if (!Number.isNaN(direct)) return direct;
+
+  // e.g. "2025-12-30 17:26:06 +0800" or "2025-12-30 17:26:06"
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\s*([+-])(\d{2}):?(\d{2}))?/);
   if (m) {
-    const day = m[1].padStart(2, "0");
-    const mon = m[2].toLowerCase();
-    const year = m[3];
-    const hms = m[4];
+    const tz = m[5] ? `${m[5]}${m[6]}:${m[7] || "00"}` : "";
+    const t = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}${tz}`);
+    if (!Number.isNaN(t)) return t;
+  }
+
+  // Standard RSS 2.0 (e.g. "Fri, 26 Dec 2025 19:59:00 +0800")
+  m = s.match(/(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{2}:\d{2}:\d{2})(?:\s*([+-]\d{2}):?(\d{2})|[A-Z]{1,5})?/);
+  if (m) {
     const monthMap = {
       jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
       jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12"
     };
-    const mm = monthMap[mon];
-    if (mm) return `${year}-${mm}-${day} ${hms}`;
+    const mm = monthMap[m[2].toLowerCase()];
+    if (mm) {
+      const day = m[1].padStart(2, "0");
+      let tz = "";
+      if (m[5] && m[6] != null) tz = `${m[5]}:${m[6]}`;
+      else if (m[5] && /^[+-]\d{2}$/.test(m[5])) tz = `${m[5]}:00`;
+      const t = Date.parse(`${m[3]}-${mm}-${day}T${m[4]}${tz}`);
+      if (!Number.isNaN(t)) return t;
+    }
   }
 
-  // 2. 36Kr / China format (e.g. "2025-12-30 17:26:06 +0800")
-  m = s.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2}:\d{2})/);
-  if (m) {
-      return `${m[1]}-${m[2]}-${m[3]} ${m[4]}`;
-  }
-
-  // Fallback: try Date parsing
   const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s;
-  const y = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, "0");
-  const da = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${y}-${mo}-${da} ${hh}:${mi}:${ss}`;
+  return Number.isNaN(d.getTime()) ? NaN : d.getTime();
+}
+
+function formatPubDate(pubDate, timeZone) {
+  const s = String(pubDate || "").trim();
+  if (!s) return "";
+
+  const ms = parsePubDateToMs(s);
+  if (Number.isNaN(ms)) return s;
+
+  try {
+    const d = new Date(ms);
+    const opts = {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    };
+    if (timeZone) opts.timeZone = timeZone;
+    const parts = new Intl.DateTimeFormat("sv-SE", opts).formatToParts(d);
+    const get = (type) => parts.find((p) => p.type === type)?.value || "";
+    return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}`;
+  } catch (e) {
+    return s;
+  }
 }
 
 async function getRssNews({ url, limit = 50, timeZone } = {}, signal) {
@@ -107,10 +134,14 @@ async function getRssNews({ url, limit = 50, timeZone } = {}, signal) {
     const xml = await fetchRss(url, signal);
     const parsed = parseRss(xml);
     const items = (parsed.items || [])
-      .map((x) => ({
-        ...x,
-        date: x.pubDate ? formatPubDate(x.pubDate, timeZone) : ""
-      }))
+      .map((x) => {
+        const dateMs = parsePubDateToMs(x.pubDate);
+        return {
+          ...x,
+          dateMs: Number.isFinite(dateMs) ? dateMs : null,
+          date: x.pubDate ? formatPubDate(x.pubDate, timeZone) : ""
+        };
+      })
       .slice(0, limit);
     return {
       items,
@@ -141,5 +172,6 @@ async function getAllRssNews({ urls = [], limit = 50, timeZone } = {}, signal) {
 
 window.CalendarExtNews = {
   getRssNews,
-  getAllRssNews
+  getAllRssNews,
+  parsePubDateToMs
 };

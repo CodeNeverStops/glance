@@ -68,6 +68,72 @@ function truncateWithEllipsis(s, maxChars) {
   return text.slice(0, Math.max(0, n - 3)).trimEnd() + "...";
 }
 
+function pluralEn(n, singular, plural) {
+  return n === 1 ? singular : plural;
+}
+
+function formatRelativeTime(ms, lang, now = Date.now()) {
+  const t = Number(ms);
+  if (!Number.isFinite(t) || t <= 0) return "";
+  const zh = lang === "zh";
+  const diff = now - t;
+  if (diff < 0) return zh ? "刚刚" : "just now";
+
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  const month = 30 * day;
+  const year = 365 * day;
+
+  if (diff < minute) return zh ? "刚刚" : "just now";
+  if (diff < hour) {
+    const n = Math.floor(diff / minute);
+    return zh ? `${n}分钟前` : `${n} ${pluralEn(n, "minute", "minutes")} ago`;
+  }
+  if (diff < day) {
+    const n = Math.floor(diff / hour);
+    return zh ? `${n}小时前` : `${n} ${pluralEn(n, "hour", "hours")} ago`;
+  }
+  if (diff < week) {
+    const n = Math.floor(diff / day);
+    return zh ? `${n}天前` : `${n} ${pluralEn(n, "day", "days")} ago`;
+  }
+  if (diff < month) {
+    const n = Math.floor(diff / week);
+    return zh ? `${n}周前` : `${n} ${pluralEn(n, "week", "weeks")} ago`;
+  }
+  if (diff < year) {
+    const n = Math.floor(diff / month);
+    return zh ? `${n}个月前` : `${n} ${pluralEn(n, "month", "months")} ago`;
+  }
+  const n = Math.floor(diff / year);
+  return zh ? `${n}年前` : `${n} ${pluralEn(n, "year", "years")} ago`;
+}
+
+function resolveNewsDateMs(it) {
+  const direct = Number(it && it.dateMs);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const News = window.CalendarExtNews;
+  if (News && typeof News.parsePubDateToMs === "function") {
+    const fromPub = News.parsePubDateToMs(it && it.pubDate);
+    if (Number.isFinite(fromPub) && fromPub > 0) return fromPub;
+    const fromDate = News.parsePubDateToMs(it && it.date);
+    if (Number.isFinite(fromDate) && fromDate > 0) return fromDate;
+  }
+  return NaN;
+}
+
+function refreshNewsRelativeTimes() {
+  const list = $("news-list");
+  if (!list) return;
+  list.querySelectorAll(".news-date[data-date-ms]").forEach((el) => {
+    const ms = Number(el.dataset.dateMs);
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    el.textContent = formatRelativeTime(ms, __uiLang);
+  });
+}
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -446,32 +512,34 @@ async function renderNews() {
           return;
       }
       
-      fillNews(data.items, data.sourceUrl);
+      fillNews(data.items);
       
       // Update source link
       source.innerHTML = `${I18n.t(uiLang, "eventsSource")}：<a href="${data.sourceUrl}" target="_blank" rel="noopener">${escapeHtml(data.sourceName)}</a>`;
       source.hidden = false;
   }
 
-  function fillNews(items, feedUrl) {
+  function fillNews(items) {
     list.innerHTML = "";
-    // Different truncation for VOA
-    const titleMax = /voanews\.com/i.test(feedUrl || "") ? 43 : 23;
-    
+
     for (const it of items || []) {
       const li = document.createElement("li");
       const fullTitle = String(it.title || "");
-      const showTitle = truncateWithEllipsis(fullTitle, titleMax);
       const link = it.link || "";
-      const date = it.date ? `<span class="news-date muted">${escapeHtml(it.date)}</span>` : "";
-      
-      if (link) {
-        li.innerHTML = `<a href="${link}" target="_blank" rel="noopener" title="${escapeHtml(fullTitle)}">${escapeHtml(
-          showTitle
-        )}</a> ${date}`;
-      } else {
-        li.innerHTML = `<span title="${escapeHtml(fullTitle)}">${escapeHtml(showTitle)}</span> ${date}`;
-      }
+      const dateMs = resolveNewsDateMs(it);
+      const absolute = it.date || "";
+      const relative = Number.isFinite(dateMs) ? formatRelativeTime(dateMs, uiLang) : absolute;
+      const dateAttr = Number.isFinite(dateMs)
+        ? ` data-date-ms="${dateMs}" title="${escapeHtml(absolute)}"`
+        : (absolute ? ` title="${escapeHtml(absolute)}"` : "");
+      const dateHtml = relative
+        ? `<span class="news-date muted"${dateAttr}>${escapeHtml(relative)}</span>`
+        : "";
+      const titleHtml = link
+        ? `<a href="${link}" target="_blank" rel="noopener" title="${escapeHtml(fullTitle)}">${escapeHtml(fullTitle)}</a>`
+        : `<span class="news-title" title="${escapeHtml(fullTitle)}">${escapeHtml(fullTitle)}</span>`;
+
+      li.innerHTML = `<div class="news-item">${titleHtml}${dateHtml}</div>`;
       list.appendChild(li);
     }
     list.hidden = false;
@@ -546,6 +614,11 @@ async function main() {
 
   renderCalendar();
   setInterval(renderCalendar, 60 * 1000);
+  setInterval(refreshNewsRelativeTimes, 60 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshNewsRelativeTimes();
+  });
+  window.addEventListener("focus", refreshNewsRelativeTimes);
 
   // Render weather (non-blocking, runs in background)
   renderWeather().catch(e => console.error("Weather render error:", e));

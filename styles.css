@@ -205,16 +205,32 @@ body:not(.options) .card-right:focus-within {
   list-style: disc;
 }
 .events-list li, .news-list li { margin: 6px 0; line-height: 1.5; }
+.news-list li { overflow: hidden; }
+.news-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
 .events-list a, .news-list a {
   color: var(--text);
   text-decoration: none;
   border-bottom: 1px solid rgba(255,255,255,0.18);
 }
+.news-item a,
+.news-item .news-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .events-list a:hover, .news-list a:hover { border-bottom-color: rgba(255,255,255,0.6); }
 .events-year { color: var(--muted2); margin-right: 8px; font-variant-numeric: tabular-nums; }
 
 .news-date {
-  margin-left: 10px;
+  flex: 0 0 auto;
   font-size: 12px;
   white-space: nowrap;
 }
